@@ -2,7 +2,7 @@
     "arm_shoulder_pan": {
         "id": 1,
         "drive_mode": 0,
-        "homing_offset": 1482,
+        "homing_offset": 1551,
         "range_min": 793,
         "range_max": 3433
     },
