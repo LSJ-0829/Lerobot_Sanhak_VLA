@@ -154,9 +154,28 @@ python scripts/skills/laundry_task3.py --record    # 프레임 녹화
 `GRIP_SQUEEZE_SEC`(압착 1.2s), `GRAB_TIMEOUT`(40s), `READY_POSE`(`laundry_grabready`). 필요 시
 `grab_place_vla.py` 의 `HEADLESS_GRAB_CMD` 에 넣어 넘긴다.
 
+### VLA 사전 로딩 (상주 서버 — 집기 스톨 제거)
+
+집기 단계에서 SmolVLA(≈865MB)를 매번 새로 로드하면 그 순간 멈칫한다. 이를 없애기 위해
+랩탑에서 `grab_vla_headless.py`를 **상주 서버(`--serve`)** 로 띄우면 모델을 **한 번만** 로드하고
+Jetson 은 TCP 로 `GRASP` 신호만 보낸다.
+
+- Jetson `laundry_task3.py`의 `preload()`가 시작 Enter '전에' 랩탑 서버를 자동 기동·워밍업한다
+  (로봇이 접근·문 여는 동안 모델이 병렬로 로드됨).
+- 서버가 없거나 통신이 안 되면 **자동으로 기존 one-shot SSH 방식으로 폴백**한다(동작은 동일, 스톨만 발생).
+
+```bash
+# (선택) 랩탑에서 수동으로 서버를 미리 띄워둘 수도 있다:
+cd ~/lerobot
+python examples/lekiwi/grab_vla_headless.py --serve   # 모델 로드 후 5577 포트에서 GRASP 대기
+```
+
+관련 env: `VLA_PORT`(기본 5577), `LAPTOP_HOST`(TCP 대상, 기본 `LAPTOP_SSH` 의 IP),
+`SERVE_CMD`(서버 기동 커맨드). 프로토콜: `PING→READY`, `GRASP→RC <0|1|2>`, `BYE`.
+
 ### 랩탑 집기 단독 테스트
 
-핸드오프 없이 VLA 집기만 확인하려면 랩탑에서 직접:
+핸드오프 없이 VLA 집기만 확인하려면 랩탑에서 직접(one-shot):
 
 ```bash
 cd ~/lerobot

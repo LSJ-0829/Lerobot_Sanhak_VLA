@@ -65,7 +65,17 @@ def preload(grasp_probe):
     except Exception as e:
         print(f"  ⚠️ cv2/PIL import 경고: {e}")
 
-    # grasp 판별기(CLIP + probe) — 원판에서 [3]단계에 로드되던 가장 큰 지연.
+    # VLA 상주 서버 워밍업 — 랩탑 SmolVLA(≈865MB)를 '지금' 로드시켜 집기 순간 스톨을 없앤다.
+    # 로봇이 접근·문 여는 동안 랩탑에서 병렬로 로드된다. 실패해도 집기 때 one-shot 으로 폴백.
+    try:
+        if stage_grab.warmup_vla_server():
+            print("  VLA 상주 서버 준비 완료(랩탑 SmolVLA 로드됨)")
+        else:
+            print("  ⚠️ VLA 서버 워밍업 실패 → 집기 순간 로드(스톨 가능)")
+    except Exception as e:
+        print(f"  ⚠️ VLA 워밍업 경고: {e}")
+
+    # grasp 판별기(CLIP + probe) — Option B(VLA)에선 랩탑이 판별하므로 선택적.
     if not Path(grasp_probe).exists():
         print(f"  ⚠️ grasp probe 파일 없음: {grasp_probe} → 판별기 사전 로딩 건너뜀")
         return None

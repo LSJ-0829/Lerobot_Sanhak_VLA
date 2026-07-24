@@ -36,6 +36,7 @@ laundry_task2.py 에 갈아끼우기 (실제 반영은 나중에):
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -60,6 +61,61 @@ HEADLESS_GRAB_CMD = os.environ.get(
     "HEADLESS_GRAB_CMD",
     "cd ~/lerobot && ~/miniforge3/envs/lerobot/bin/python examples/lekiwi/grab_vla_headless.py")
 HOST_PY = os.environ.get("HOST_PY", "~/miniforge3/envs/lerobot/bin/python")
+
+# ── VLA 상주 서버(권장) 설정 ────────────────────────────────────────
+# 랩탑에서 grab_vla_headless.py --serve 를 미리 띄워 SmolVLA 를 상주시키면, 집기 순간
+# 매번 모델을 로드하던 스톨이 사라진다. Jetson 은 TCP 로 GRASP/PING 만 보낸다.
+# warmup_vla_server() 를 laundry_task3.preload() 에서 호출해 접근/문열기 동안 모델을
+# 미리 로드시킨다. 서버가 없거나 통신이 안 되면 자동으로 one-shot SSH 방식으로 폴백한다.
+LAPTOP_HOST = os.environ.get("LAPTOP_HOST", LAPTOP_SSH.split("@")[-1])  # TCP 대상 IP
+VLA_PORT = int(os.environ.get("VLA_PORT", "5577"))
+SERVE_CMD = os.environ.get(
+    "SERVE_CMD",
+    "cd ~/lerobot && ~/miniforge3/envs/lerobot/bin/python "
+    "examples/lekiwi/grab_vla_headless.py --serve")
+
+
+def _vla_send(cmd, timeout=5.0):
+    """상주 서버에 한 줄 명령을 보내고 응답 첫 줄을 반환. 실패 시 None."""
+    try:
+        with socket.create_connection((LAPTOP_HOST, VLA_PORT), timeout=timeout) as s:
+            s.settimeout(timeout)
+            s.sendall((cmd + "\n").encode())
+            return s.recv(64).decode(errors="ignore").strip()
+    except Exception:
+        return None
+
+
+def _vla_server_up():
+    return _vla_send("PING", timeout=3.0) == "READY"
+
+
+def warmup_vla_server(timeout=180.0):
+    """VLA 상주 서버가 없으면 SSH 로 띄우고 모델 로드 완료(READY)까지 기다린다.
+
+    laundry_task3.preload() 에서 호출 → 로봇이 접근/문 여는 동안 모델이 병렬로 로드된다.
+    반환 True = 서버 상주(집기 스톨 없음). 실패해도 예외 없이 False (집기 때 one-shot 폴백).
+    """
+    if _vla_server_up():
+        print("  [VLA] 상주 서버 이미 READY → 재사용")
+        return True
+    print(f"  [VLA] 상주 서버 기동(SSH {LAPTOP_SSH}) — SmolVLA 로드 대기...")
+    try:
+        subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
+             LAPTOP_SSH, f"setsid nohup {SERVE_CMD} > /tmp/vla_serve.log 2>&1 < /dev/null &"],
+            timeout=20)
+    except Exception as e:
+        print(f"  [VLA] 서버 기동 SSH 실패: {e} → 집기 때 one-shot 폴백")
+        return False
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(3.0)
+        if _vla_server_up():
+            print("  [VLA] ✅ 상주 서버 READY(모델 로드 완료)")
+            return True
+    print("  [VLA] ⚠️ 서버 워밍업 타임아웃 → 집기 때 one-shot 폴백")
+    return False
 
 
 def _host_running():
@@ -111,14 +167,27 @@ def run_vla_grasp(port="/dev/ttyACM0", ready_pose="laundry_grabready",
             print("  [VLA] host 기동 실패"); return False
         time.sleep(3.0)  # ZMQ 바인딩 여유
 
-    # 3) 랩탑 headless grab 호출(SSH). 종료코드 0 = 잡음 확정.
-    print(f"  [VLA] 랩탑 grab 호출: {LAPTOP_SSH}")
-    try:
-        rc = subprocess.run(
-            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
-             LAPTOP_SSH, HEADLESS_GRAB_CMD], timeout=180).returncode
-    except Exception as e:
-        print(f"  [VLA] 랩탑 grab 호출 실패: {e}"); rc = 2
+    # 3) 랩탑 집기 호출. 상주 서버가 있으면 TCP GRASP(모델 상주 → 스톨 없음),
+    #    없으면 one-shot SSH 로 폴백(매번 모델 로드). 종료코드 0 = 잡음 확정.
+    rc = None
+    if _vla_server_up():
+        print(f"  [VLA] 상주 서버에 GRASP 전송: {LAPTOP_HOST}:{VLA_PORT}")
+        reply = _vla_send("GRASP", timeout=200.0)
+        if reply and reply.startswith("RC"):
+            try:
+                rc = int(reply.split()[1])
+            except (IndexError, ValueError):
+                rc = None
+        if rc is None:
+            print(f"  [VLA] 서버 응답 이상({reply!r}) → one-shot 폴백")
+    if rc is None:
+        print(f"  [VLA] one-shot grab 호출(SSH): {LAPTOP_SSH}")
+        try:
+            rc = subprocess.run(
+                ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
+                 LAPTOP_SSH, HEADLESS_GRAB_CMD], timeout=180).returncode
+        except Exception as e:
+            print(f"  [VLA] 랩탑 grab 호출 실패: {e}"); rc = 2
 
     # 4) host kill(토크 유지 → 수건 안 놓침)
     print("  [VLA] host kill(토크 유지)")
