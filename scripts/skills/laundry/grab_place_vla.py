@@ -101,9 +101,11 @@ def warmup_vla_server(timeout=180.0):
         return True
     print(f"  [VLA] 상주 서버 기동(SSH {LAPTOP_SSH}) — SmolVLA 로드 대기...")
     try:
+        # SERVE_CMD 는 'cd ... && python ...' 형태라 반드시 셸로 실행해야 한다.
+        # nohup 에 직접 넘기면 nohup 이 'cd' 를 실행파일로 여겨 실패하므로 bash -c 로 감싼다.
         subprocess.run(
             ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10",
-             LAPTOP_SSH, f"setsid nohup {SERVE_CMD} > /tmp/vla_serve.log 2>&1 < /dev/null &"],
+             LAPTOP_SSH, f"setsid nohup bash -c '{SERVE_CMD}' > /tmp/vla_serve.log 2>&1 < /dev/null &"],
             timeout=20)
     except Exception as e:
         print(f"  [VLA] 서버 기동 SSH 실패: {e} → 집기 때 one-shot 폴백")
