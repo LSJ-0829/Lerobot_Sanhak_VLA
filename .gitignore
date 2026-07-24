@@ -1,0 +1,24 @@
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# 대용량 VLA 가중치 (HF 에서 받는다 — README 참고)
+models/
+*.safetensors
+
+# 학습 데이터셋 / 녹화물
+grasp_data_*/
+runs/
+*.mp4
+
+# 백업
+*.bak
+*_bak*/
+*.orig
+
+# OS / 에디터
+.DS_Store
+.vscode/
+.idea/
